@@ -1,0 +1,159 @@
+\documentclass[11pt]{article}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{fullpage}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{graphicx}
+
+\lstdefinelanguage{Dafny}{
+    morekeywords={module, predicate, method, requires, ensures, invariant, modifies, decreases, ghost, if, else, while, forall, returns, by},
+    sensitive=true,
+    morecomment=[l]{//},
+    morestring=[b]"
+}
+\lstset{
+  language=Dafny,
+  basicstyle=\ttfamily\small,
+  numbers=left,
+  numberstyle=\tiny\color{gray},
+  stepnumber=1,
+  numbersep=5pt,
+  backgroundcolor=\color{white},
+  showspaces=false,
+  showstringspaces=false,
+  showtabs=false,
+  frame=single,
+  tabsize=2,
+  breaklines=true,
+  breakatwhitespace=false,
+  keywordstyle=\color{blue}\bfseries,
+  commentstyle=\color{green!50!black},
+  stringstyle=\color{red},
+  captionpos=b
+}
+
+\title{Formal Verification of a Selection Sort Algorithm in Dafny}
+\author{Zitian Wang}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section{Introduction}
+This report presents the deductive verification of a selection sort algorithm implemented in Dafny. The goal is to formally prove that the algorithm sorts an array in non-decreasing order while preserving the multiset of elements. In this report, we discuss our choice of algorithm, the properties specified in the program, the design of invariants and annotations, adjustments made to simplify verification, and the hardest steps encountered during the process.
+
+\section{Algorithm Selection}
+For this project, we chose to verify a selection sort algorithm. The reasons for this choice include:
+\begin{itemize}
+    \item \textbf{Simplicity:} Selection sort has a straightforward structure which makes it easier to modularize and verify.
+    \item \textbf{Clear invariants:} The sorted prefix and the property that every element in the sorted part is less than or equal to those in the unsorted part can be expressed concisely.
+    \item \textbf{Modularity:} By separating out helper methods, such as the method to find the minimum index in a subarray, the verification of each component becomes more manageable.
+\end{itemize}
+
+\section{Specification and Implementation}
+In our Dafny implementation, we define two main predicates to specify sortedness:
+\begin{itemize}
+    \item \texttt{isSorted} asserts that the entire array is sorted.
+    \item \texttt{isSortedPrefix} asserts that the first \( n \) elements are sorted.
+\end{itemize}
+
+We also implement a helper method \texttt{MinIndex} to locate the minimum element in a subarray. The main sorting method, \texttt{SelectionSort}, repeatedly finds the minimum element in the unsorted portion and swaps it into position.
+
+Below we present code segments along with detailed commentary.
+
+\subsection{Sortedness Predicates}
+\begin{lstlisting}[caption={Sortedness Predicates}, label={lst:sortedness}]
+predicate isSorted(a: array<int>)
+  requires a != null
+  reads a
+{
+  isSortedPrefix(a, a.Length)
+}
+
+predicate isSortedPrefix(a: array<int>, n: int)
+  requires a != null
+  requires 0 <= n <= a.Length
+  reads a
+{
+  forall i, j :: 0 <= i < j < n ==> a[i] <= a[j]
+}
+\end{lstlisting}
+
+\textbf{Discussion:}  
+Here, \texttt{isSortedPrefix} is defined to capture the property that the first \( n \) elements of the array are in non-decreasing order. The predicate \texttt{isSorted} then simply applies \texttt{isSortedPrefix} to the entire array. This modular approach simplifies both the specification and the verification process.
+
+\subsection{Finding the Minimum Index}
+\begin{lstlisting}[caption={MinIndex Method}, label={lst:minindex}]
+method MinIndex(a: array<int>, start: int) returns (minIdx: int)
+  requires a != null
+  requires 0 <= start < a.Length
+  ensures start <= minIdx < a.Length
+  ensures forall i :: start <= i < a.Length ==> a[minIdx] <= a[i]
+{
+  minIdx := start;
+  var j := start;
+  while j < a.Length
+    invariant start <= j <= a.Length
+    invariant start <= minIdx < a.Length
+    invariant forall k :: start <= k < j ==> a[minIdx] <= a[k]
+    decreases a.Length - j
+  {
+    if a[j] < a[minIdx] {
+      minIdx := j;
+    }
+    j := j + 1;
+  }
+}
+\end{lstlisting}
+
+\textbf{Discussion:}  
+The \texttt{MinIndex} method searches for the smallest element in the subarray starting at index \texttt{start}. The loop invariants ensure that at each iteration, \texttt{minIdx} is the index of the smallest element in the examined part. This method is a key component because its correctness is essential for ensuring the overall sorting algorithm works properly.
+
+\subsection{SelectionSort Method}
+\begin{lstlisting}[caption={SelectionSort Method}, label={lst:selectionsort}]
+method SelectionSort(a: array<int>)
+  requires a != null
+  modifies a
+  ensures isSorted(a)
+{
+  var n := a.Length;
+  var pos := 0;
+  while pos < n
+    invariant 0 <= pos <= n
+    invariant forall i, j :: 0 <= i < pos <= j < n ==> a[i] <= a[j]
+    invariant isSortedPrefix(a, pos)
+    decreases n - pos
+  {
+    var mi := MinIndex(a, pos);
+    // Swap the element at 'pos' with the minimum element in a[pos .. n)
+    var temp := a[pos];
+    a[pos] := a[mi];
+    a[mi] := temp;
+    pos := pos + 1;
+  }
+}
+\end{lstlisting}
+
+\textbf{Discussion:}  
+The \texttt{SelectionSort} method works by incrementally building a sorted prefix. The loop invariant ensures that the subarray from index 0 to \texttt{pos} is sorted and that every element in the sorted prefix is less than or equal to every element in the unsorted portion. Each iteration calls \texttt{MinIndex} to find the minimum element in the unsorted part and then swaps it into the correct position. This clear separation of concerns makes both the implementation and the subsequent verification more tractable.
+
+\section{Verification Process and Discussion}
+Dafny generates verification conditions based on the preconditions, postconditions, and loop invariants. Discharging these VCs using an SMT solver gives us the following assurances:
+\begin{itemize}
+    \item The loop invariants in both \texttt{MinIndex} and \texttt{SelectionSort} hold throughout execution.
+    \item The postconditions of all methods are met upon termination.
+    \item The overall property of sortedness (\texttt{isSorted}) is guaranteed by the maintained invariants.
+\end{itemize}
+
+\textbf{Challenges Encountered:}
+\begin{itemize}
+    \item \textit{Invariant Design:} One of the hardest parts was designing invariants that are strong enough to prove correctness yet not overly complex. In our approach, expressing that every element in the sorted prefix is less than or equal to every element in the unsorted portion required careful formulation.
+    \item \textit{Modular Verification:} Splitting the verification into modular components (such as \texttt{MinIndex}) helped in managing complexity. However, ensuring that the interactions between these components satisfy the overall specification still required iteration and refinement.
+    \item \textit{Tool Limitations:} At times, the SMT solver needed additional hints through invariants and assertions. Balancing these hints without overcomplicating the code was an iterative process.
+\end{itemize}
+
+\section{Conclusion}
+This report presented a fully verified Dafny implementation of a selection sort algorithm. We discussed our algorithm choice, the specification properties, detailed annotations, and the challenges faced during verification. The modular design not only simplified verification but also provides a good basis for verifying more complex algorithms in future work.
+
+\end{document}
